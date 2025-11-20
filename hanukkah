@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>HANUKKAH AR by AISH</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Three.js & MediaPipe Imports -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+                "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm"
+            }
+        }
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;600;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #050505; 
+            color: white; 
+            overflow: hidden; 
+            overscroll-behavior: none;
+        }
+
+        /* MIRROR EFFECT: Flip the entire container horizontally */
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            transform: scaleX(-1); 
+        }
+
+        .neon-text {
+            text-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 20px #00f2ff, 0 0 30px #00f2ff, 0 0 40px #00f2ff;
+        }
+
+        .score-text {
+            font-family: 'Press Start 2P', cursive;
+            color: #ffd700;
+            text-shadow: 2px 2px #000;
+        }
+
+        .glass-panel {
+            background: rgba(20, 20, 20, 0.85); /* Darker for readability */
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none; 
+        }
+
+        .interactive {
+            pointer-events: auto;
+        }
+
+        #loader {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #000;
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .loader-ring {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #333;
+            border-top: 4px solid #00f2ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .game-popup {
+            position: absolute;
+            top: 40%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            font-size: 3rem;
+            font-weight: 900;
+            color: white;
+            text-shadow: 0 0 15px #00f2ff;
+            pointer-events: none;
+            z-index: 30;
+            text-align: center;
+            white-space: nowrap;
+        }
+        .game-popup.show {
+            transform: translate(-50%, -50%) scale(1);
+        }
+        
+        #status-container {
+            background: rgba(0,0,0,0.6);
+            padding: 10px 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            margin-top: 10px;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+
+    <audio id="bg-music" loop>
+        <source src="https://d22u3d3zed5w5h.cloudfront.net/audio/holidays/dreidel.mp3" type="audio/mpeg">
+    </audio>
+
+    <div id="loader">
+        <div class="loader-ring mb-4"></div>
+        <h1 class="text-xl font-bold tracking-widest neon-text text-center">HANUKKAH AR<br>by AISH</h1>
+        <p class="text-gray-400 text-sm mt-2">Loading...</p>
+    </div>
+
+    <div id="popup-text" class="game-popup neon-text">GREAT!</div>
+    
+    <div id="canvas-container"></div>
+
+    <!-- UI Layer -->
+    <div id="ui-layer" class="flex flex-col justify-between p-4">
+        
+        <!-- Header -->
+        <div class="flex justify-between items-start interactive w-full">
+            <div>
+                <h1 class="text-3xl font-black italic tracking-tighter text-white drop-shadow-lg" style="text-shadow: 2px 2px 0px #000;">HANUKKAH AR <br><span class="text-cyan-400 text-xl">by AISH</span></h1>
+                <div id="status-container">
+                    <p id="status-text" class="text-lg text-cyan-200 font-bold uppercase tracking-wide">INITIALIZING...</p>
+                </div>
+            </div>
+            
+            <div class="flex gap-2 items-start">
+                <!-- Score / Candle Counter -->
+                <div class="glass-panel px-4 py-3 rounded-xl flex flex-col items-center min-w-[100px]">
+                    <span id="score-label" class="text-xs text-gray-300 uppercase font-bold">Score</span>
+                    <span id="score-display" class="score-text text-2xl">0</span>
+                    <!-- Candle Counter (Hidden by default) -->
+                    <div id="candle-counter" class="hidden mt-2 pt-2 border-t border-white/20">
+                        <span class="text-[10px] text-gray-300 uppercase block">LIT</span>
+                        <span id="lit-count" class="text-xl font-bold text-orange-400">0/9</span>
+                    </div>
+                </div>
+
+                <button id="music-btn" class="glass-panel p-4 rounded-full hover:bg-cyan-900 transition active:scale-95 relative border-2 border-cyan-500/30">
+                    <!-- Play Icon (Hidden by default now since we want autoplay) -->
+                    <svg id="music-icon-off" class="hidden" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#00f2ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                    <!-- Stop Icon (Visible by default) -->
+                    <svg id="music-icon-on" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ff0055" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16"></rect></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Mode Selector -->
+        <div class="absolute right-4 top-1/2 transform -translate-y-1/2 flex flex-col gap-4 interactive">
+            <button onclick="app.setMode('menorah')" id="btn-menorah" class="mode-btn glass-panel w-16 h-16 rounded-xl flex items-center justify-center hover:border-cyan-400 border-l-4 border-cyan-400 transition group relative shadow-lg">
+                <span class="text-3xl">🕯️</span>
+                <span class="absolute right-20 bg-black/90 text-white text-sm font-bold px-3 py-2 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition border border-gray-700">Menorah</span>
+            </button>
+            <button onclick="app.setMode('dreidels')" id="btn-dreidels" class="mode-btn glass-panel w-16 h-16 rounded-xl flex items-center justify-center hover:border-cyan-400 transition group relative shadow-lg">
+                <span class="text-3xl">🎲</span>
+                <span class="absolute right-20 bg-black/90 text-white text-sm font-bold px-3 py-2 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition border border-gray-700">Dreidels</span>
+            </button>
+            <button onclick="app.setMode('gelt')" id="btn-gelt" class="mode-btn glass-panel w-16 h-16 rounded-xl flex items-center justify-center hover:border-cyan-400 transition group relative shadow-lg">
+                <span class="text-3xl">💰</span>
+                <span class="absolute right-20 bg-black/90 text-white text-sm font-bold px-3 py-2 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition border border-gray-700">Gelt Bag</span>
+            </button>
+        </div>
+
+        <div class="w-full interactive"></div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
+
+        class HanukkahApp {
+            constructor() {
+                this.container = document.getElementById('canvas-container');
+                this.videoElement = document.createElement('video');
+                
+                this.mode = 'menorah'; 
+                this.score = 0;
+                this.litCandlesCount = 0;
+                
+                // Audio - ON BY DEFAULT
+                this.isMusicPlaying = true; 
+                this.bgAudio = document.getElementById('bg-music');
+                this.bgAudio.volume = 0.5;
+                
+                this.handLandmarker = null;
+                this.lastVideoTime = -1;
+                this.landmarks = [];
+
+                this.scene = null;
+                this.camera = null;
+                this.renderer = null;
+                
+                // Objects
+                this.menorahGroup = new THREE.Group();
+                this.resetButton = null;
+                this.candles = [];
+                this.flames = [];
+                this.shamashFlame = null; 
+                
+                this.dreidelGroup = new THREE.Group();
+                this.dreidels = [];
+                this.draggedDreidel = null;
+                this.spawnBox = null; // New spawn box
+
+                this.geltGroup = new THREE.Group();
+                this.coins = [];
+                this.lastCoinTime = 0;
+                this.geltBag = null;
+
+                this.prevIndexTip = null; 
+
+                this.init();
+            }
+
+            async init() {
+                await this.setupCamera();
+                await this.setupMediaPipe();
+                this.setupThreeJS();
+
+                this.buildMenorah();
+                this.buildDreidels();
+                this.buildGeltSystem();
+                this.buildGeltBag();
+                
+                this.bindEvents();
+                this.setMode('menorah');
+                document.getElementById('loader').style.display = 'none';
+                
+                // Try to play music immediately
+                this.bgAudio.play().catch(e => {
+                    console.log("Autoplay prevented. Waiting for interaction.");
+                    // Fallback: Play on first touch
+                    window.addEventListener('click', () => {
+                        if(this.isMusicPlaying && this.bgAudio.paused) this.bgAudio.play();
+                    }, { once: true });
+                });
+
+                this.animate();
+            }
+
+            async setupCamera() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, 
+                        audio: false 
+                    });
+                    this.videoElement.srcObject = stream;
+                    this.videoElement.play();
+                    return new Promise(r => this.videoElement.onloadeddata = r);
+                } catch(e) {
+                    console.error("Access denied", e);
+                    alert("Camera access required.");
+                }
+            }
+
+            async setupMediaPipe() {
+                const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
+                this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO",
+                    numHands: 1
+                });
+            }
+
+            setupThreeJS() {
+                this.scene = new THREE.Scene();
+                const aspect = window.innerWidth / window.innerHeight;
+                this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+                this.camera.position.z = 5;
+
+                this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.container.appendChild(this.renderer.domElement);
+
+                const videoTexture = new THREE.VideoTexture(this.videoElement);
+                videoTexture.colorSpace = THREE.SRGBColorSpace;
+                this.scene.background = videoTexture;
+
+                this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+                const dirLight = new THREE.DirectionalLight(0xffd700, 1.5); 
+                dirLight.position.set(2, 5, 5);
+                this.scene.add(dirLight);
+                
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+            }
+
+            // --- BUILDERS ---
+
+            buildMenorah() {
+                const mat = new THREE.MeshStandardMaterial({ color: 0xC0C0C0, metalness: 0.8, roughness: 0.3 });
+                const base = new THREE.Mesh(new THREE.BoxGeometry(5, 0.3, 0.8), mat);
+                base.position.y = -2.5;
+                this.menorahGroup.add(base);
+
+                for(let i = 0; i < 9; i++) {
+                    const isShamash = i === 4;
+                    const h = isShamash ? 2.0 : 1.5;
+                    const yPos = -2.2 + (h/2);
+                    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.2, h, 16), mat);
+                    stem.position.set((i - 4) * 0.6, yPos, 0);
+                    this.menorahGroup.add(stem);
+
+                    const wax = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.7, 16), new THREE.MeshStandardMaterial({ color: 0xFFFFFF }));
+                    wax.position.set((i - 4) * 0.6, yPos + h/2 + 0.35, 0);
+                    wax.userData = { id: i, lit: false };
+                    this.menorahGroup.add(wax);
+                    this.candles.push(wax);
+
+                    const flame = this.createFlameMesh();
+                    flame.position.set((i - 4) * 0.6, yPos + h/2 + 0.8, 0);
+                    flame.visible = false;
+                    this.menorahGroup.add(flame);
+                    this.flames.push(flame);
+                }
+
+                // RESET BUTTON (Updated Position & Size)
+                // Moved to Right Side (Positive X in World Space = Visual Left due to Mirror Flip)
+                const btnGroup = new THREE.Group();
+                const btnBase = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.15, 32), new THREE.MeshStandardMaterial({color: 0x333333}));
+                const btnTop = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.15, 32), new THREE.MeshStandardMaterial({color: 0xff0000, emissive: 0x550000}));
+                btnTop.position.y = 0.15;
+                
+                btnGroup.add(btnBase, btnTop);
+                // Position: Positive X 4.5, Lower Y -1.5
+                btnGroup.position.set(4.5, -1.5, 0); 
+                btnGroup.rotation.x = 0.5;
+                btnGroup.scale.set(1.5, 1.5, 1.5); // Bigger
+                
+                this.resetButton = btnGroup;
+                this.menorahGroup.add(this.resetButton);
+                
+                this.shamashFlame = this.createFlameMesh();
+                this.shamashFlame.scale.set(1.5, 1.5, 1.5);
+                this.shamashFlame.visible = false;
+                this.scene.add(this.shamashFlame);
+                this.menorahGroup.visible = false;
+                this.scene.add(this.menorahGroup);
+            }
+
+            createFlameMesh() {
+                const geo = new THREE.ConeGeometry(0.15, 0.4, 8);
+                geo.translate(0, 0.2, 0);
+                const mat = new THREE.MeshBasicMaterial({ color: 0xff6600 });
+                const mesh = new THREE.Mesh(geo, mat);
+                const light = new THREE.PointLight(0xffaa00, 1, 4);
+                light.position.y = 0.2;
+                mesh.add(light);
+                return mesh;
+            }
+
+            buildDreidels() {
+                // Initial Dreidels
+                for(let i = 0; i < 5; i++) {
+                   this.spawnNewDreidel(true);
+                }
+
+                // Spawn Box (Caja para sacar mas)
+                // Pos: Bottom Right in World space (+X) = Bottom Left in Visual space
+                const boxGeo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+                const boxMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, metalness: 0.8, roughness: 0.2 });
+                this.spawnBox = new THREE.Mesh(boxGeo, boxMat);
+                this.spawnBox.position.set(5, -2.5, 0); 
+                this.spawnBox.rotation.y = -0.5;
+                
+                // Label on box
+                const label = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.8), new THREE.MeshBasicMaterial({color:0xffffff}));
+                label.position.z = 0.76;
+                this.spawnBox.add(label);
+
+                this.dreidelGroup.add(this.spawnBox);
+                this.dreidelGroup.visible = false;
+                this.scene.add(this.dreidelGroup);
+            }
+
+            spawnNewDreidel(randomPos = false) {
+                 const colors = [0x0099ff, 0xff0055, 0x00cc44, 0xffd700, 0x9933ff, 0xff6600, 0x00ffff, 0xff00ff, 0x333333, 0xeeeeee];
+                 const group = new THREE.Group();
+                 const col = colors[Math.floor(Math.random() * colors.length)];
+                 
+                 const box = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshStandardMaterial({ color: col }));
+                 const cone = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.6, 4), new THREE.MeshStandardMaterial({ color: 0xcccccc }));
+                 cone.rotation.x = Math.PI; cone.rotation.y = Math.PI/4; cone.position.y = -0.6;
+                 const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.5, 16), new THREE.MeshStandardMaterial({ color: 0xcccccc }));
+                 handle.position.y = 0.55;
+                 
+                 group.add(box, cone, handle);
+                 
+                 if (randomPos) {
+                    group.position.set((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 4, 0);
+                 } else {
+                    // Spawn from box
+                    group.position.set(5, -1.5, 0);
+                 }
+
+                 group.userData = { velocity: 0, id: Math.random(), isDragging: false };
+                 this.dreidelGroup.add(group);
+                 this.dreidels.push(group);
+            }
+
+            buildGeltSystem() {
+                const geom = new THREE.CylinderGeometry(0.35, 0.35, 0.05, 20);
+                geom.rotateX(Math.PI / 2);
+                this.coinPoolMat = new THREE.MeshStandardMaterial({ color: 0xffff00, metalness: 0.8, roughness: 0.2, emissive: 0x222200 });
+                this.coinGeom = geom;
+                this.geltGroup.visible = false;
+                this.scene.add(this.geltGroup);
+            }
+
+            buildGeltBag() {
+                const group = new THREE.Group();
+                const bagGeo = new THREE.SphereGeometry(0.8, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.7);
+                const bagMat = new THREE.MeshStandardMaterial({ color: 0x000088, roughness: 0.8 });
+                const bag = new THREE.Mesh(bagGeo, bagMat);
+                bag.rotation.x = Math.PI; 
+                const rim = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.1, 16, 32), new THREE.MeshStandardMaterial({ color: 0xffd700 }));
+                rim.position.y = 0.5;
+                rim.rotation.x = Math.PI / 2;
+                group.add(bag, rim);
+                this.geltBag = group;
+                this.geltBag.visible = false;
+                this.scene.add(this.geltBag);
+            }
+
+            spawnCoin() {
+                const coin = new THREE.Mesh(this.coinGeom, this.coinPoolMat);
+                coin.position.set((Math.random() * 6) - 3, 5, 0);
+                coin.rotation.set(Math.random(), Math.random(), Math.random());
+                this.geltGroup.add(coin);
+                this.coins.push(coin);
+            }
+
+            // --- LOGIC ---
+
+            setMode(newMode) {
+                this.mode = newMode;
+                this.menorahGroup.visible = false;
+                this.dreidelGroup.visible = false;
+                this.geltGroup.visible = false;
+                this.shamashFlame.visible = false;
+                this.geltBag.visible = false;
+                
+                document.getElementById('candle-counter').classList.add('hidden');
+                document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('border-l-4', 'border-cyan-400'));
+                
+                const status = document.getElementById('status-text');
+
+                if (newMode === 'menorah') {
+                    this.menorahGroup.visible = true;
+                    this.shamashFlame.visible = true;
+                    document.getElementById('btn-menorah').classList.add('border-l-4', 'border-cyan-400');
+                    document.getElementById('candle-counter').classList.remove('hidden');
+                    status.innerText = "TOUCH CANDLES. USE RED BUTTON TO RESET.";
+                    this.updateCandleCount();
+                } else if (newMode === 'dreidels') {
+                    this.dreidelGroup.visible = true;
+                    document.getElementById('btn-dreidels').classList.add('border-l-4', 'border-cyan-400');
+                    status.innerText = "SPIN DREIDELS! TOUCH BOX FOR MORE.";
+                } else if (newMode === 'gelt') {
+                    this.geltGroup.visible = true;
+                    this.geltBag.visible = true;
+                    document.getElementById('btn-gelt').classList.add('border-l-4', 'border-cyan-400');
+                    status.innerText = "COLLECT HANUKKAH GELT";
+                }
+            }
+
+            showPopup(text) {
+                const pop = document.getElementById('popup-text');
+                pop.innerText = text;
+                pop.classList.add('show');
+                setTimeout(() => pop.classList.remove('show'), 1000);
+            }
+
+            updateScore(val) {
+                this.score += val;
+                document.getElementById('score-display').innerText = this.score;
+            }
+
+            updateCandleCount() {
+                const count = this.candles.filter(c => c.userData.lit).length;
+                document.getElementById('lit-count').innerText = `${count}/9`;
+            }
+
+            detectInteraction(landmarks) {
+                if (!landmarks || landmarks.length === 0) return;
+                
+                const hand = landmarks[0];
+                const indexTip = hand[8];
+                const thumbTip = hand[4];
+
+                // --- MIRROR LOGIC ---
+                const x = (indexTip.x * 2 - 1); 
+                const y = -(indexTip.y * 2 - 1);
+                
+                const vector = new THREE.Vector3(x, y, 0.5);
+                vector.unproject(this.camera);
+                const dir = vector.sub(this.camera.position).normalize();
+                const dist = -this.camera.position.z / dir.z;
+                const fingerPos = this.camera.position.clone().add(dir.multiplyScalar(dist));
+
+                const pinchDist = Math.sqrt(Math.pow(indexTip.x - thumbTip.x, 2) + Math.pow(indexTip.y - thumbTip.y, 2));
+                const isPinching = pinchDist < 0.06;
+
+                // --- MENORAH MODE ---
+                if (this.mode === 'menorah') {
+                    this.shamashFlame.position.copy(fingerPos);
+                    
+                    this.candles.forEach(c => {
+                        if (fingerPos.distanceTo(c.position) < 0.4 && !c.userData.lit) {
+                            c.userData.lit = true;
+                            this.flames[c.userData.id].visible = true;
+                            this.updateScore(10);
+                            this.updateCandleCount();
+                        }
+                    });
+
+                    // Red Button Logic
+                    // Position 4.5, -1.5, 0
+                    const btnPos = new THREE.Vector3(4.5, -1.5, 0);
+                    if (fingerPos.distanceTo(btnPos) < 0.8) {
+                        this.resetButton.position.y = -1.6; // Visual press
+                        
+                        let changed = false;
+                        this.candles.forEach(c => {
+                            if(c.userData.lit) {
+                                c.userData.lit = false;
+                                this.flames[c.userData.id].visible = false;
+                                changed = true;
+                            }
+                        });
+                        if(changed) {
+                            this.updateCandleCount();
+                            this.showPopup("RESET!");
+                        }
+                    } else {
+                        this.resetButton.position.y = -1.5; 
+                    }
+                }
+
+                // --- DREIDEL MODE ---
+                if (this.mode === 'dreidels') {
+                    // 1. Check Spawn Box Collision
+                    if (fingerPos.distanceTo(this.spawnBox.position) < 1.0) {
+                        // Throttle spawn
+                        if (!this.lastSpawnTime || Date.now() - this.lastSpawnTime > 1000) {
+                            this.spawnNewDreidel(false);
+                            this.lastSpawnTime = Date.now();
+                            this.showPopup("NEW DREIDEL!");
+                        }
+                    }
+
+                    // 2. Dreidel Logic
+                    let velocity = 0;
+                    if (this.prevIndexTip) {
+                        const dx = indexTip.x - this.prevIndexTip.x;
+                        const dy = indexTip.y - this.prevIndexTip.y;
+                        velocity = Math.sqrt(dx*dx + dy*dy);
+                    }
+                    this.prevIndexTip = {x: indexTip.x, y: indexTip.y};
+
+                    if (!isPinching && this.draggedDreidel) {
+                        this.draggedDreidel.userData.isDragging = false;
+                        this.draggedDreidel = null;
+                    }
+
+                    this.dreidels.forEach(d => {
+                        const distToFinger = fingerPos.distanceTo(d.position);
+                        
+                        if (isPinching && distToFinger < 0.8 && !this.draggedDreidel) {
+                            this.draggedDreidel = d;
+                            d.userData.isDragging = true;
+                            d.userData.velocity = 0; 
+                        }
+
+                        if (d.userData.isDragging) {
+                            d.position.copy(fingerPos);
+                        } else {
+                            // Much simpler spin trigger
+                            if (distToFinger < 0.8 && velocity > 0.01) { 
+                                d.userData.velocity += 0.1;
+                                if(d.userData.velocity > 1.0) d.userData.velocity = 1.0; 
+                            }
+                        }
+                    });
+                }
+
+                // --- GELT MODE ---
+                if (this.mode === 'gelt') {
+                    this.geltBag.position.copy(fingerPos);
+                    this.geltBag.position.y -= 0.5; 
+                    this.geltBag.rotation.set(0.2, 0, 0);
+
+                    for(let i=this.coins.length-1; i>=0; i--) {
+                        const c = this.coins[i];
+                        if (c.position.distanceTo(this.geltBag.position) < 0.8) {
+                            this.geltGroup.remove(c);
+                            this.coins.splice(i, 1);
+                            this.updateScore(20);
+                            this.showPopup("HANUKKAH GELT!");
+                        }
+                    }
+                }
+            }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                const time = Date.now() * 0.001;
+
+                if (this.handLandmarker && this.videoElement.videoWidth > 0) {
+                    if (Date.now() - this.lastVideoTime > 30) {
+                        this.lastVideoTime = Date.now();
+                        const res = this.handLandmarker.detectForVideo(this.videoElement, performance.now());
+                        this.landmarks = res.landmarks;
+                    }
+                }
+                this.detectInteraction(this.landmarks);
+
+                // Animations
+                this.dreidels.forEach(d => {
+                    if (d.userData.velocity > 0 && !d.userData.isDragging) {
+                        d.rotation.y += d.userData.velocity;
+                    }
+                    if (!d.userData.isDragging) {
+                         d.position.y += Math.sin(time * 2 + d.userData.id) * 0.002;
+                         // Move newly spawned ones slightly
+                         if(d.position.x > 2 && d.position.x < 4.5) d.position.x -= 0.05;
+                    }
+                });
+
+                this.flames.forEach(f => { if(f.visible) f.scale.setScalar(1 + Math.sin(time * 20 + f.id) * 0.2); });
+                if(this.shamashFlame.visible) this.shamashFlame.scale.setScalar(1.5 + Math.sin(time * 25) * 0.2);
+
+                if (this.mode === 'gelt') {
+                    if(Date.now() - this.lastCoinTime > 800) {
+                        this.spawnCoin();
+                        this.lastCoinTime = Date.now();
+                    }
+                    for(let i=this.coins.length-1; i>=0; i--) {
+                        const c = this.coins[i];
+                        c.position.y -= 0.04;
+                        c.rotation.z += 0.02;
+                        if(c.position.y < -4) {
+                            this.geltGroup.remove(c);
+                            this.coins.splice(i, 1);
+                        }
+                    }
+                }
+
+                this.renderer.render(this.scene, this.camera);
+            }
+
+            bindEvents() {
+                const btn = document.getElementById('music-btn');
+                const onIcon = document.getElementById('music-icon-on');
+                const offIcon = document.getElementById('music-icon-off');
+
+                btn.addEventListener('click', () => {
+                    this.isMusicPlaying = !this.isMusicPlaying;
+                    if(this.isMusicPlaying) {
+                        this.bgAudio.play();
+                        offIcon.classList.add('hidden');
+                        onIcon.classList.remove('hidden');
+                    } else {
+                        this.bgAudio.pause();
+                        offIcon.classList.remove('hidden');
+                        onIcon.classList.add('hidden');
+                    }
+                });
+            }
+        }
+
+        window.app = new HanukkahApp();
+    </script>
+</body>
+</html>
